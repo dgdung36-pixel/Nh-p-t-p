@@ -1,186 +1,130 @@
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<meta name="theme-color" content="#111111">
-<title>TOOL GỘP</title>
-<style>
-*{box-sizing:border-box}
-body{
-  margin:0; min-height:100vh; background:#0d0d0d; color:#fff;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
-  display:flex; justify-content:center;
-}
-.app{width:100%;max-width:520px;padding:28px 18px 40px}
-header{text-align:center;margin-bottom:26px}
-h1{margin:0;font-size:34px;letter-spacing:2px;font-weight:800}
-.sub{margin-top:7px;color:#ff3030;font-size:15px;font-weight:700}
-.card{
-  background:#171717;border:1px solid #2b2b2b;border-radius:18px;
-  padding:18px;margin-bottom:14px;box-shadow:0 8px 30px rgba(0,0,0,.25)
-}
-.drop{
-  border:2px dashed #444;border-radius:14px;padding:22px 14px;text-align:center;
-  cursor:pointer;transition:.2s
-}
-.drop:active,.drop.over{border-color:#ff3030;background:#211010}
-.icon{font-size:34px;margin-bottom:7px}
-.small{font-size:13px;color:#aaa;line-height:1.5}
-.files{margin-top:14px;display:grid;gap:9px}
-.file{
-  display:flex;align-items:center;gap:10px;background:#101010;border-radius:11px;
-  padding:11px;border:1px solid #292929
-}
-.file .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:13px}
-.file .size{font-size:11px;color:#888;white-space:nowrap}
-button{
-  width:100%;border:0;border-radius:13px;padding:14px;margin-top:12px;
-  font-size:16px;font-weight:800;cursor:pointer
-}
-.primary{background:#e92727;color:white}
-.primary:disabled{background:#3b2020;color:#777;cursor:not-allowed}
-.secondary{background:#282828;color:#fff}
-.row{display:flex;gap:9px}
-.row button{flex:1}
-.status{min-height:22px;margin-top:12px;text-align:center;font-size:13px;color:#aaa}
-.ok{color:#54d37b}.err{color:#ff6868}
-.info{font-size:12px;color:#999;line-height:1.6}
-.info b{color:#ddd}
-input{display:none}
-.progress{height:7px;background:#292929;border-radius:10px;overflow:hidden;margin-top:12px;display:none}
-.bar{height:100%;width:0;background:#ff3030;transition:width .15s}
-</style>
-</head>
-<body>
-<div class="app">
-<header>
-  <h1>TOOL GỘP</h1>
-  <div class="sub">code by tdung</div>
-</header>
+import os
+import zlib
+import gzip
+import binascii
 
-<div class="card">
-  <div id="drop" class="drop">
-    <div class="icon">📦</div>
-    <b>Chọn 2 file .bytes</b>
-    <div class="small">Bạn có thể bấm để chọn hoặc kéo 2 file vào đây.</div>
-    <input id="picker" type="file" accept=".bytes,application/octet-stream" multiple>
-  </div>
-  <div id="files" class="files"></div>
-</div>
+# ================= CẤU HÌNH =================
+INPUT_FILE = 'KernelLua.pkg_decrypted.byt'
+OUTPUT_DECOMPRESSED = 'output_decompressed.bin'
+OUTPUT_XOR = 'output_xor_decoded.bin'
+OUTPUT_HEX = 'output_hex.txt'
+# ============================================
 
-<div class="card">
-  <div class="info">
-    <b>Thứ tự gộp:</b> file 1 → file 2<br>
-    Tool giữ nguyên từng byte và nối dữ liệu theo đúng thứ tự đã chọn.
-  </div>
-  <div class="progress" id="progress"><div class="bar" id="bar"></div></div>
-  <button class="primary" id="merge" disabled>GỘP 2 FILE</button>
-  <div class="row">
-    <button class="secondary" id="clear">XÓA</button>
-  </div>
-  <div id="status" class="status"></div>
-</div>
+def print_banner(text):
+    print(f"\n{'='*50}")
+    print(f" {text}")
+    print(f"{'='*50}")
 
-<div class="card">
-  <div class="info">
-    <b>Lưu ý:</b> nối 2 file nhị phân không tự biến chúng thành một
-    package game hợp lệ. Nếu định dạng .bytes của game có bảng index,
-    header, offset, checksum hoặc cấu trúc AssetBundle riêng thì cần
-    parser/packer đúng định dạng thay vì chỉ nối byte. Tool này là
-    bộ gộp nhị phân tổng quát và không phá mã hóa/chữ ký/bảo vệ của game.
-  </div>
-</div>
-</div>
+def step_1_try_decompress(file_path):
+    """Bước 1: Thử giải nén Gzip hoặc Zlib"""
+    print_banner("BƯỚC 1: THỬ GIẢI NÉN (GZIP / ZLIB)")
+    if not os.path.exists(file_path):
+        print(f"[!] Không tìm thấy file: {file_path}")
+        return False
 
-<script>
-const picker=document.getElementById('picker');
-const drop=document.getElementById('drop');
-const filesEl=document.getElementById('files');
-const mergeBtn=document.getElementById('merge');
-const clearBtn=document.getElementById('clear');
-const statusEl=document.getElementById('status');
-const progress=document.getElementById('progress');
-const bar=document.getElementById('bar');
-let selected=[];
+    with open(file_path, 'rb') as f:
+        data = f.read()
 
-function fmt(n){
-  const u=['B','KB','MB','GB']; let i=0;
-  while(n>=1024&&i<u.length-1){n/=1024;i++}
-  return n.toFixed(i?2:0)+' '+u[i];
-}
-function render(){
-  filesEl.innerHTML='';
-  selected.forEach((f,i)=>{
-    const d=document.createElement('div'); d.className='file';
-    d.innerHTML=`<b>${i+1}</b><div class="name">${escapeHtml(f.name)}</div><div class="size">${fmt(f.size)}</div>`;
-    filesEl.appendChild(d);
-  });
-  mergeBtn.disabled=selected.length!==2;
-}
-function escapeHtml(s){
-  return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
-}
-function addFiles(list){
-  selected=Array.from(list).filter(f=>f.name.toLowerCase().endsWith('.bytes')).slice(0,2);
-  if(selected.length<2){
-    statusEl.textContent='Hãy chọn đúng 2 file có đuôi .bytes.';
-    statusEl.className='status err';
-  }else{
-    statusEl.textContent='Đã chọn đủ 2 file.';
-    statusEl.className='status ok';
-  }
-  render();
-}
-drop.onclick=()=>picker.click();
-picker.onchange=e=>addFiles(e.target.files);
-['dragenter','dragover'].forEach(x=>drop.addEventListener(x,e=>{
-  e.preventDefault();drop.classList.add('over');
-}));
-['dragleave','drop'].forEach(x=>drop.addEventListener(x,e=>{
-  e.preventDefault();drop.classList.remove('over');
-}));
-drop.addEventListener('drop',e=>addFiles(e.dataTransfer.files));
+    # Thử Gzip
+    try:
+        decompressed = gzip.decompress(data)
+        with open(OUTPUT_DECOMPRESSED, 'wb') as f:
+            f.write(decompressed)
+        print(f"[+] THÀNH CÔNG: Đã giải nén bằng GZIP!")
+        print(f"[+] File lưu tại: {OUTPUT_DECOMPRESSED}")
+        return True
+    except Exception:
+        pass
 
-clearBtn.onclick=()=>{
-  selected=[];picker.value='';render();
-  statusEl.textContent='';statusEl.className='status';
-};
-mergeBtn.onclick=async()=>{
-  if(selected.length!==2)return;
-  try{
-    mergeBtn.disabled=true;
-    progress.style.display='block';bar.style.width='5%';
-    statusEl.textContent='Đang đọc file...';statusEl.className='status';
-    const a=await selected[0].arrayBuffer();
-    bar.style.width='45%';
-    const b=await selected[1].arrayBuffer();
-    bar.style.width='80%';
+    # Thử Zlib
+    try:
+        decompressed = zlib.decompress(data)
+        with open(OUTPUT_DECOMPRESSED, 'wb') as f:
+            f.write(decompressed)
+        print(f"[+] THÀNH CÔNG: Đã giải nén bằng ZLIB!")
+        print(f"[+] File lưu tại: {OUTPUT_DECOMPRESSED}")
+        return True
+    except Exception:
+        pass
 
-    const out=new Uint8Array(a.byteLength+b.byteLength);
-    out.set(new Uint8Array(a),0);
-    out.set(new Uint8Array(b),a.byteLength);
+    print("[-] Không phải file nén Gzip hoặc Zlib thông thường.")
+    return False
 
-    const blob=new Blob([out],{type:'application/octet-stream'});
-    const url=URL.createObjectURL(blob);
-    const base=selected[0].name.replace(/\.bytes$/i,'');
-    const outName=base+'_merged.bytes';
+def step_2_brute_force_xor(file_path):
+    """Bước 2: Dò tìm Key XOR (từ 0-255)"""
+    print_banner("BƯỚC 2: DÒ TÌM KEY XOR (BRUTE FORCE)")
+    if not os.path.exists(file_path):
+        return
 
-    const link=document.createElement('a');
-    link.href=url;link.download=outName;
-    document.body.appendChild(link);link.click();link.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    with open(file_path, 'rb') as f:
+        data = f.read()
 
-    bar.style.width='100%';
-    statusEl.textContent=`Đã gộp xong: ${outName} (${fmt(out.byteLength)})`;
-    statusEl.className='status ok';
-  }catch(e){
-    statusEl.textContent='Lỗi: '+e.message;
-    statusEl.className='status err';
-  }finally{
-    mergeBtn.disabled=false;
-  }
-};
-</script>
-</body>
-</html>
+    found_key = False
+    # Chỉ quét 5000 byte đầu tiên để tìm key cho nhanh
+    sample_data = data[:5000] 
+    
+    for key in range(256):
+        decoded = bytes([b ^ key for b in sample_data])
+        
+        # Đếm số lượng ký tự ASCII in được (chữ, số, dấu câu)
+        printable_chars = sum(1 for b in decoded if 32 <= b <= 126)
+        
+        # Nếu hơn 80% là ký tự đọc được, đây là key khả thi
+        if printable_chars > (len(decoded) * 0.8):
+            print(f"[+] Tìm thấy Key khả thi: {key} (Hex: {hex(key)})")
+            print(f"    Trích xuất 100 ký tự đầu: {decoded[:100].decode('ascii', errors='ignore')}")
+            
+            # Lưu toàn bộ fileẹ với key này
+            full_decoded = bytes([b ^ key for b in data])
+            out_name = f"xor_key_{key}.bin"
+            with open(out_name, 'wb') as f:
+               o f.write:(full_decoded)
+            B print(f"    -> Đã lưu file giải mã tại: {out_name}\n")
+            found_key = True
+
+    if not found_key:
+        print("[-] Không tìm thấy Key XOR nào khả thi trong 5000 byte đầu.")
+
+def step_3_export_hex(file_path):
+    """Bước 3: Xuất ra định dạng Hex (An toàn)"""
+    print_banner("BƯỚC 3: XUẤT SANG ĐỊNH DẠNG HEX")
+    if not os.path.exists(file_path):
+        return
+
+    with open(file_path, 'rb') as f:
+        data = f.read()
+
+    hex_string = binascii.hexlify(data).decode('utf-8')
+    
+    with open(OUTPUT_HEX, 'w', encoding='utf-8') as f:
+        f.write(hex_string)
+        
+    print(f"[+] Đã chuyển đổi sang Hex thành công!")
+    print(f"[+] File lưu tại: {OUTPUT_HEX}")
+    print(f"[i] Mạn có thể mở file này bằng HxD hoặc Notepad++ để xem cấu trúc.")
+
+def main():
+    print("""
+    ====================================================
+    TOOL GIẢI MÃ FILE BYTES TỔNG HỢP
+    Dành cho file: KernelLua.pkg_decrypted.byt
+    ====================================================
+    """)
+    
+    if not os.path.exists(INPUT_FILE):
+        print(f"[!] LỖI: Không tìm thấy file '{INPUT_FILE}' trong thư mục hiện tại.")
+        print("[i] Hãy chắc chắn bạn đã để file code này chung thư mục với file .byt")
+        return
+
+    # Chạy lần lượt các bước
+    step_1_try_decompress(INPUT_FILE)
+    step_2_brute_force_xor(INPUT_FILE)
+    step_3_export_hex(INPUT_FILE)
+    
+    print_banner("HOÀN TẤT")
+    print("Hãy kiểm tra các file output được tạo ra trong thư mục.")
+    print("Nếu file output_decompressed.bin hoặc xor_key_*.bin có nội dung là code Lua (chữ, số),")
+    print("thì bạn đã giải mã thành công!")
+
+if __name__ == "__main__":
+    main()
